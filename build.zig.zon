@@ -438,4 +438,14 @@
             },
         },
     },
+    .aliases = .{
+        .@"run:bench_ssz" = .{
+            .description = "Run all SSZ benchmarks",
+            .depends_on = .{
+                "run:bench_ssz_attestation",
+                "run:bench_ssz_block",
+                "run:bench_ssz_state",
+            },
+        },
+    },
 }
