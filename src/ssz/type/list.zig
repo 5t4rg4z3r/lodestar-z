@@ -3,6 +3,8 @@ const TypeKind = @import("type_kind.zig").TypeKind;
 const isBasicType = @import("type_kind.zig").isBasicType;
 const isFixedType = @import("type_kind.zig").isFixedType;
 const canMemcpySsz = @import("type_kind.zig").canMemcpySsz;
+const SszSize = @import("type_kind.zig").SszSize;
+const toSszSize = @import("type_kind.zig").toSszSize;
 const VariableElementIterator = @import("variable_element_iterator.zig").VariableElementIterator;
 const MerkleAccumulator = @import("hashing").MerkleAccumulator;
 const mixInLength = @import("hashing").mixInLength;
@@ -54,16 +56,16 @@ pub fn FixedListType(comptime ST: type, comptime _limit: comptime_int, comptime 
     return struct {
         pub const kind = TypeKind.list;
         pub const Element: type = ST;
-        pub const limit: usize = _limit;
+        pub const limit: SszSize = _limit;
         pub const opts: TypeOpts = _opts;
         pub const Type: type = std.ArrayListUnmanaged(Element.Type);
         pub const TreeView: type = if (isBasicType(Element))
             ListBasicTreeView(@This())
         else
             ListCompositeTreeView(@This());
-        pub const min_size: usize = 0;
-        pub const max_size: usize = Element.fixed_size * limit;
-        pub const max_chunk_count: usize = if (isBasicType(Element)) std.math.divCeil(usize, max_size, 32) catch unreachable else limit;
+        pub const min_size: SszSize = 0;
+        pub const max_size: SszSize = @as(SszSize, Element.fixed_size) * limit;
+        pub const max_chunk_count: SszSize = if (isBasicType(Element)) std.math.divCeil(SszSize, max_size, 32) catch unreachable else limit;
         pub const chunk_depth: u8 = maxChunksToDepth(max_chunk_count);
         pub const use_chunked_leaf: bool = _opts.chunked_leaf;
         const ChunkedLeaf = if (use_chunked_leaf) pmt.ChunkedLeaf else struct {};
@@ -106,7 +108,7 @@ pub fn FixedListType(comptime ST: type, comptime _limit: comptime_int, comptime 
         }
 
         pub fn hashTreeRoot(_: std.mem.Allocator, value: *const Type, out: *[32]u8) !void {
-            if (value.items.len > limit) return error.gtLimit;
+            if (toSszSize(value.items.len) > limit) return error.gtLimit;
             var accumulator = MerkleAccumulator.init(chunk_depth);
             if (comptime isBasicType(Element)) {
                 const items_per_chunk = 32 / Element.fixed_size;
@@ -177,7 +179,7 @@ pub fn FixedListType(comptime ST: type, comptime _limit: comptime_int, comptime 
 
         pub fn deserializeFromBytes(allocator: std.mem.Allocator, data: []const u8, out: *Type) !void {
             const len = try std.math.divExact(usize, data.len, Element.fixed_size);
-            if (len > limit) {
+            if (toSszSize(len) > limit) {
                 return error.gtLimit;
             }
 
@@ -209,7 +211,8 @@ pub fn FixedListType(comptime ST: type, comptime _limit: comptime_int, comptime 
                 else => return error.InvalidJson,
             }
 
-            for (0..limit + 1) |i| {
+            var i: usize = 0;
+            while (true) {
                 switch (try source.peekNextTokenType()) {
                     .array_end => {
                         _ = try source.next();
@@ -218,17 +221,21 @@ pub fn FixedListType(comptime ST: type, comptime _limit: comptime_int, comptime 
                     else => {},
                 }
 
+                if (toSszSize(i) >= limit) return error.invalidLength;
+
                 _ = try out.addOne(allocator);
                 out.items[i] = Element.default_value;
                 try Element.deserializeFromJson(source, &out.items[i]);
+
+                if (i == std.math.maxInt(usize)) return error.invalidLength;
+                i += 1;
             }
-            return error.invalidLength;
         }
 
         pub const serialized = struct {
             pub fn validate(data: []const u8) !void {
                 const len = try std.math.divExact(usize, data.len, Element.fixed_size);
-                if (len > limit) {
+                if (toSszSize(len) > limit) {
                     return error.gtLimit;
                 }
                 for (0..len) |i| {
@@ -238,7 +245,7 @@ pub fn FixedListType(comptime ST: type, comptime _limit: comptime_int, comptime 
 
             pub fn length(data: []const u8) !usize {
                 const len = try std.math.divExact(usize, data.len, Element.fixed_size);
-                if (len > limit) {
+                if (toSszSize(len) > limit) {
                     return error.gtLimit;
                 }
                 return len;
@@ -281,7 +288,7 @@ pub fn FixedListType(comptime ST: type, comptime _limit: comptime_int, comptime 
             }
 
             pub fn zeros(pool: *Node.Pool, len: usize) !Node.Id {
-                if (len > limit) {
+                if (toSszSize(len) > limit) {
                     return error.gtLimit;
                 }
 
@@ -311,7 +318,7 @@ pub fn FixedListType(comptime ST: type, comptime _limit: comptime_int, comptime 
 
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
                 const len = try std.math.divExact(usize, data.len, Element.fixed_size);
-                if (len > limit) {
+                if (toSszSize(len) > limit) {
                     return error.gtLimit;
                 }
                 if (comptime Element.kind == .bool) {
@@ -686,15 +693,18 @@ pub fn VariableListType(comptime ST: type, comptime _limit: comptime_int) type {
         const Self = @This();
         pub const kind = TypeKind.list;
         pub const Element: type = ST;
-        pub const limit: usize = _limit;
+        pub const limit: SszSize = _limit;
         pub const Type: type = std.ArrayListUnmanaged(Element.Type);
         pub const TreeView: type = if (isBasicType(Element))
             ListBasicTreeView(@This())
         else
             ListCompositeTreeView(@This());
-        pub const min_size: usize = 0;
-        pub const max_size: usize = Element.max_size * limit + 4 * limit;
-        pub const max_chunk_count: usize = limit;
+        pub const min_size: SszSize = 0;
+        pub const max_size: SszSize = if (Element.max_size == std.math.maxInt(SszSize))
+            std.math.maxInt(SszSize)
+        else
+            (Element.max_size + 4) * limit;
+        pub const max_chunk_count: SszSize = limit;
         pub const chunk_depth: u8 = maxChunksToDepth(max_chunk_count);
 
         pub const default_value: Type = Type.empty;
@@ -755,7 +765,7 @@ pub fn VariableListType(comptime ST: type, comptime _limit: comptime_int) type {
         }
 
         pub fn hashTreeRoot(allocator: std.mem.Allocator, value: *const Type, out: *[32]u8) !void {
-            if (value.items.len > limit) return error.gtLimit;
+            if (toSszSize(value.items.len) > limit) return error.gtLimit;
             var accumulator = MerkleAccumulator.init(chunk_depth);
             for (value.items) |*element| {
                 var chunk: [32]u8 = undefined;
@@ -848,7 +858,7 @@ pub fn VariableListType(comptime ST: type, comptime _limit: comptime_int) type {
             }
 
             pub fn zeros(pool: *Node.Pool, len: usize) !Node.Id {
-                if (len > limit) {
+                if (toSszSize(len) > limit) {
                     return error.gtLimit;
                 }
 
@@ -989,7 +999,8 @@ pub fn VariableListType(comptime ST: type, comptime _limit: comptime_int) type {
                 else => return error.InvalidJson,
             }
 
-            for (0..limit + 1) |i| {
+            var i: usize = 0;
+            while (true) {
                 switch (try source.peekNextTokenType()) {
                     .array_end => {
                         _ = try source.next();
@@ -998,11 +1009,15 @@ pub fn VariableListType(comptime ST: type, comptime _limit: comptime_int) type {
                     else => {},
                 }
 
+                if (toSszSize(i) >= limit) return error.invalidLength;
+
                 _ = try out.addOne(allocator);
                 out.items[i] = Element.default_value;
                 try Element.deserializeFromJson(allocator, source, &out.items[i]);
+
+                if (i == std.math.maxInt(usize)) return error.invalidLength;
+                i += 1;
             }
-            return error.invalidLength;
         }
     };
 }

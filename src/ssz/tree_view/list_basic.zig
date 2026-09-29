@@ -269,7 +269,7 @@ pub fn ListBasicTreeView(comptime ST: type) type {
 
         pub fn push(self: *Self, value: Element) !void {
             const list_length = try self.length();
-            if (list_length >= ST.limit) {
+            if (list_length == std.math.maxInt(usize) or @as(u64, list_length) >= ST.limit) {
                 return error.LengthOverLimit;
             }
 

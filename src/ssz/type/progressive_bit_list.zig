@@ -10,6 +10,7 @@ const bytesToHex = @import("hex").bytesToHex;
 const hexByteLen = @import("hex").hexByteLen;
 const hexLenFromBytes = @import("hex").hexLenFromBytes;
 const mixInLength = @import("hashing").mixInLength;
+const SszSize = @import("type_kind.zig").SszSize;
 const Node = @import("persistent_merkle_tree").Node;
 const progressive = @import("progressive.zig");
 
@@ -23,8 +24,8 @@ pub fn ProgressiveBitListType() type {
         pub const kind = TypeKind.progressive_bit_list;
         pub const Element: type = BoolType();
         pub const Type: type = BitList(.{ .limit = unlimited });
-        pub const min_size: usize = 1;
-        pub const max_size: usize = std.math.maxInt(usize);
+        pub const min_size: SszSize = 1;
+        pub const max_size: SszSize = std.math.maxInt(SszSize);
 
         pub const default_value: Type = Type.empty;
 

@@ -1,6 +1,8 @@
 const std = @import("std");
 const BitList = @import("bit_array").BitList;
 const TypeKind = @import("type_kind.zig").TypeKind;
+const SszSize = @import("type_kind.zig").SszSize;
+const toSszSize = @import("type_kind.zig").toSszSize;
 const BoolType = @import("bool.zig").BoolType;
 const hexToBytes = @import("hex").hexToBytes;
 const bytesToHex = @import("hex").bytesToHex;
@@ -26,12 +28,12 @@ pub fn BitListType(comptime _limit: comptime_int) type {
     return struct {
         pub const kind = TypeKind.list;
         pub const Element: type = BoolType();
-        pub const limit: usize = _limit;
+        pub const limit: SszSize = _limit;
         pub const Type: type = BitList(.{ .limit = limit });
         pub const TreeView: type = BitListTreeView(@This());
-        pub const min_size: usize = 1;
-        pub const max_size: usize = std.math.divCeil(usize, limit + 1, 8) catch unreachable;
-        pub const max_chunk_count: usize = std.math.divCeil(usize, limit, 256) catch unreachable;
+        pub const min_size: SszSize = 1;
+        pub const max_size: SszSize = std.math.divCeil(SszSize, limit + 1, 8) catch unreachable;
+        pub const max_chunk_count: SszSize = std.math.divCeil(SszSize, limit, 256) catch unreachable;
         pub const chunk_depth: u8 = maxChunksToDepth(max_chunk_count);
 
         pub const default_value: Type = Type.empty;
@@ -56,7 +58,7 @@ pub fn BitListType(comptime _limit: comptime_int) type {
 
         pub fn hashTreeRoot(_: std.mem.Allocator, value: *const Type, out: *[32]u8) !void {
             const data = value.data.items;
-            std.debug.assert(value.bit_len <= limit);
+            std.debug.assert(toSszSize(value.bit_len) <= limit);
             std.debug.assert(data.len == (std.math.divCeil(usize, value.bit_len, 8) catch unreachable));
 
             const full_chunk_count = data.len / 32;
@@ -124,7 +126,7 @@ pub fn BitListType(comptime _limit: comptime_int) type {
             }
             const last_1_index: u3 = @intCast(7 - last_byte_clz);
             const bit_len = (data.len - 1) * 8 + last_1_index;
-            if (bit_len > limit) {
+            if (toSszSize(bit_len) > limit) {
                 return error.tooLarge;
             }
 
@@ -165,7 +167,7 @@ pub fn BitListType(comptime _limit: comptime_int) type {
                 }
                 const last_1_index: u3 = @intCast(7 - last_byte_clz);
                 const bit_len = (data.len - 1) * 8 + last_1_index;
-                if (bit_len > limit) {
+                if (toSszSize(bit_len) > limit) {
                     return error.tooLarge;
                 }
                 return .{
@@ -214,7 +216,7 @@ pub fn BitListType(comptime _limit: comptime_int) type {
             }
 
             pub fn zeros(pool: *Node.Pool, bit_len: usize) !Node.Id {
-                if (bit_len > limit) {
+                if (toSszSize(bit_len) > limit) {
                     return error.tooLarge;
                 }
                 const len_mixin = try pool.createLeafFromUint(bit_len);
@@ -385,7 +387,7 @@ pub fn BitListType(comptime _limit: comptime_int) type {
             const bytes = try allocator.alloc(u8, hexByteLen(hex_bytes));
             defer allocator.free(bytes);
             const written = try hexToBytes(bytes, hex_bytes);
-            if (written.len > max_size) {
+            if (toSszSize(written.len) > max_size) {
                 return error.invalidLength;
             }
             try deserializeFromBytes(allocator, bytes, out);

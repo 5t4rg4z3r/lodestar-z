@@ -1,5 +1,7 @@
 const std = @import("std");
 const TypeKind = @import("type_kind.zig").TypeKind;
+const SszSize = @import("type_kind.zig").SszSize;
+const toSszSize = @import("type_kind.zig").toSszSize;
 
 const isFixedType = @import("type_kind.zig").isFixedType;
 const isBasicType = @import("type_kind.zig").isBasicType;
@@ -454,24 +456,24 @@ pub fn VariableContainerType(comptime ST: type) type {
     comptime var native_types: [ssz_fields.len]type = undefined;
     comptime var native_attrs: [ssz_fields.len]std.builtin.Type.StructField.Attributes = undefined;
     comptime var _offsets: [ssz_fields.len]usize = undefined;
-    comptime var _min_size: usize = 0;
-    comptime var _max_size: usize = 0;
+    comptime var _min_size: SszSize = 0;
+    comptime var _max_size: SszSize = 0;
     comptime var _fixed_end: usize = 0;
     comptime var _fixed_count: usize = 0;
     inline for (ssz_fields, 0..) |field, i| {
         _offsets[i] = _fixed_end;
         if (comptime isFixedType(field.type)) {
-            _min_size += field.type.fixed_size;
-            if (_max_size != std.math.maxInt(usize)) {
-                _max_size += field.type.fixed_size;
+            _min_size += @as(SszSize, field.type.fixed_size);
+            if (_max_size != std.math.maxInt(SszSize)) {
+                _max_size += @as(SszSize, field.type.fixed_size);
             }
             _fixed_end += field.type.fixed_size;
             _fixed_count += 1;
         } else {
             _min_size += field.type.min_size + 4;
-            // Handle unbounded types (max_size == maxInt(usize))
-            if (field.type.max_size == std.math.maxInt(usize) or _max_size == std.math.maxInt(usize)) {
-                _max_size = std.math.maxInt(usize);
+            // Handle unbounded types (max_size == maxInt(SszSize))
+            if (field.type.max_size == std.math.maxInt(SszSize) or _max_size == std.math.maxInt(SszSize)) {
+                _max_size = std.math.maxInt(SszSize);
             } else {
                 _max_size += field.type.max_size + 4;
             }
@@ -499,8 +501,8 @@ pub fn VariableContainerType(comptime ST: type) type {
         pub const Fields: type = ST;
         pub const Type: type = T;
         pub const TreeView: type = ContainerTreeView(@This());
-        pub const min_size: usize = _min_size;
-        pub const max_size: usize = _max_size;
+        pub const min_size: SszSize = _min_size;
+        pub const max_size: SszSize = _max_size;
         pub const field_offsets: [fields.len]usize = _offsets;
         pub const fixed_end: usize = _fixed_end;
         pub const fixed_count: usize = _fixed_count;
@@ -616,7 +618,7 @@ pub fn VariableContainerType(comptime ST: type) type {
         }
 
         pub fn deserializeFromBytes(allocator: std.mem.Allocator, data: []const u8, out: *Type) !void {
-            if (data.len > max_size or data.len < min_size) {
+            if (toSszSize(data.len) > max_size or toSszSize(data.len) < min_size) {
                 return error.InvalidSize;
             }
 
@@ -728,7 +730,7 @@ pub fn VariableContainerType(comptime ST: type) type {
 
         pub const serialized = struct {
             pub fn validate(data: []const u8) !void {
-                if (data.len > max_size or data.len < min_size) {
+                if (toSszSize(data.len) > max_size or toSszSize(data.len) < min_size) {
                     return error.InvalidSize;
                 }
 
@@ -779,7 +781,7 @@ pub fn VariableContainerType(comptime ST: type) type {
             }
 
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
-                if (data.len > max_size or data.len < min_size) {
+                if (toSszSize(data.len) > max_size or toSszSize(data.len) < min_size) {
                     return error.InvalidSize;
                 }
 

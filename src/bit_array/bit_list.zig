@@ -1,16 +1,16 @@
 const std = @import("std");
 
-pub const unlimited: ?usize = null;
+pub const unlimited: ?u64 = null;
 
 pub const BitListOptions = struct {
     /// Maximum logical length in bits; unlimited imposes no limit beyond usize.
-    limit: ?usize,
+    limit: ?u64,
 };
 
 /// Owns packed bytes with least-significant-bit-first indexing.
 /// Keep data.items.len equal to ceil(bit_len / 8) and unused trailing bits zero.
 pub fn BitList(comptime options: BitListOptions) type {
-    const limit = options.limit orelse std.math.maxInt(usize);
+    const limit = options.limit orelse std.math.maxInt(u64);
     return struct {
         data: std.ArrayList(u8),
         bit_len: usize,
@@ -25,7 +25,7 @@ pub fn BitList(comptime options: BitListOptions) type {
         }
 
         pub fn fromBitLen(allocator: std.mem.Allocator, bit_len: usize) !@This() {
-            if (bit_len > limit) {
+            if (@as(u64, bit_len) > limit) {
                 return error.tooLarge;
             }
 
@@ -128,7 +128,7 @@ pub fn BitList(comptime options: BitListOptions) type {
 
         /// Grows through bit_index when needed, zeroing intervening bits.
         pub fn set(self: *@This(), allocator: std.mem.Allocator, bit_index: usize, bit: bool) !void {
-            if (bit_index >= limit) {
+            if (bit_index == std.math.maxInt(usize) or @as(u64, bit_index) >= limit) {
                 return error.tooLarge;
             }
             if (bit_index + 1 > self.bit_len) {
@@ -138,7 +138,7 @@ pub fn BitList(comptime options: BitListOptions) type {
         }
 
         pub fn resize(self: *@This(), allocator: std.mem.Allocator, bit_len: usize) !void {
-            if (bit_len > limit) {
+            if (@as(u64, bit_len) > limit) {
                 return error.tooLarge;
             }
 

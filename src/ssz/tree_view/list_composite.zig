@@ -187,7 +187,7 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
         /// `value` and must free it.
         pub fn push(self: *Self, value: Element) !void {
             const list_length = try self.length();
-            if (list_length >= ST.limit) {
+            if (list_length == std.math.maxInt(usize) or @as(u64, list_length) >= ST.limit) {
                 return error.LengthOverLimit;
             }
 
@@ -199,7 +199,8 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
 
         /// Push an SSZ value type, creating a TreeView internally.
         pub fn pushValue(self: *Self, value: *const ST.Element.Type) !void {
-            if ((try self.length()) >= ST.limit) return error.LengthOverLimit;
+            const list_length = try self.length();
+            if (list_length == std.math.maxInt(usize) or @as(u64, list_length) >= ST.limit) return error.LengthOverLimit;
 
             const root = try ST.Element.tree.fromValue(self.chunks.state.pool, value);
             const child_view = ST.Element.TreeView.init(self.allocator, self.chunks.state.pool, root) catch |err| {

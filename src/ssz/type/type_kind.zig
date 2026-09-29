@@ -10,6 +10,16 @@ pub const TypeKind = enum {
     compatible_union,
 };
 
+/// Compile-time SSZ size and collection-limit metadata.
+///
+/// Protocol limits can exceed a 32-bit target's address space even though every
+/// runtime slice, index, and allocation remains bounded by `usize`.
+pub const SszSize = u64;
+
+pub inline fn toSszSize(value: usize) SszSize {
+    return @intCast(value);
+}
+
 /// Basic types are primitives
 pub fn isBasicType(T: type) bool {
     return T.kind == .uint or T.kind == .bool;

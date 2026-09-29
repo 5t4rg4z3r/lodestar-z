@@ -14,6 +14,19 @@ const TypeTestCase = @import("test_utils.zig").TypeTestCase;
 const FixedListType = @import("list.zig").FixedListType;
 const VariableListType = @import("list.zig").VariableListType;
 
+test "list metadata represents limits wider than usize on 32-bit targets" {
+    const huge_limit: u64 = 1 << 40;
+    const HugeBytes = FixedListType(UintType(8), huge_limit, .{});
+    const Nested = VariableListType(HugeBytes, 1024);
+
+    try std.testing.expect(@TypeOf(HugeBytes.limit) == u64);
+    try std.testing.expect(@TypeOf(HugeBytes.max_size) == u64);
+    try std.testing.expect(@TypeOf(Nested.max_size) == u64);
+    try std.testing.expectEqual(huge_limit, HugeBytes.limit);
+    try std.testing.expectEqual(huge_limit, HugeBytes.max_size);
+    try std.testing.expectEqual((huge_limit + 4) * 1024, Nested.max_size);
+}
+
 const PoolExhaustionCheckpoint = FixedContainerType(struct {
     epoch: UintType(64),
     root: ByteVectorType(32),

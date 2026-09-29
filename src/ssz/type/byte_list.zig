@@ -1,5 +1,7 @@
 const std = @import("std");
 const TypeKind = @import("type_kind.zig").TypeKind;
+const SszSize = @import("type_kind.zig").SszSize;
+const toSszSize = @import("type_kind.zig").toSszSize;
 const UintType = @import("uint.zig").UintType;
 const hexToBytes = @import("hex").hexToBytes;
 const hexByteLen = @import("hex").hexByteLen;
@@ -25,13 +27,13 @@ pub fn ByteListType(comptime _limit: comptime_int) type {
     return struct {
         pub const kind = TypeKind.list;
         pub const Element: type = UintType(8);
-        pub const limit: usize = _limit;
+        pub const limit: SszSize = _limit;
         pub const opts: @import("list.zig").TypeOpts = .{};
         pub const Type: type = std.ArrayListUnmanaged(Element.Type);
         pub const TreeView: type = ListBasicTreeView(@This());
-        pub const min_size: usize = 0;
-        pub const max_size: usize = Element.fixed_size * limit;
-        pub const max_chunk_count: usize = std.math.divCeil(usize, max_size, 32) catch unreachable;
+        pub const min_size: SszSize = 0;
+        pub const max_size: SszSize = @as(SszSize, Element.fixed_size) * limit;
+        pub const max_chunk_count: SszSize = std.math.divCeil(SszSize, max_size, 32) catch unreachable;
         pub const chunk_depth: Depth = maxChunksToDepth(max_chunk_count);
         const GenericList = @import("list.zig").FixedListType(Element, limit, .{});
 
@@ -84,13 +86,13 @@ pub fn ByteListType(comptime _limit: comptime_int) type {
 
         pub const serialized = struct {
             pub fn validate(data: []const u8) !void {
-                if (data.len > limit) {
+                if (toSszSize(data.len) > limit) {
                     return error.gtLimit;
                 }
             }
 
             pub fn length(data: []const u8) !usize {
-                if (data.len > limit) {
+                if (toSszSize(data.len) > limit) {
                     return error.gtLimit;
                 }
                 return data.len;
@@ -108,7 +110,7 @@ pub fn ByteListType(comptime _limit: comptime_int) type {
             }
 
             pub fn zeros(pool: *Node.Pool, len: usize) !Node.Id {
-                if (len > limit) {
+                if (toSszSize(len) > limit) {
                     return error.tooLarge;
                 }
                 const len_mixin = try pool.createLeafFromUint(len);
@@ -121,7 +123,7 @@ pub fn ByteListType(comptime _limit: comptime_int) type {
             }
 
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
-                if (data.len > limit) {
+                if (toSszSize(data.len) > limit) {
                     return error.gtLimit;
                 }
 
@@ -229,7 +231,7 @@ pub fn ByteListType(comptime _limit: comptime_int) type {
         };
 
         pub fn deserializeFromBytes(allocator: std.mem.Allocator, data: []const u8, out: *Type) !void {
-            if (data.len > limit) {
+            if (toSszSize(data.len) > limit) {
                 return error.invalidLength;
             }
 
@@ -252,7 +254,7 @@ pub fn ByteListType(comptime _limit: comptime_int) type {
             };
 
             const hex_bytes_len = hexByteLen(hex_bytes);
-            if (hex_bytes_len > limit) {
+            if (toSszSize(hex_bytes_len) > limit) {
                 return error.InvalidJson;
             }
 

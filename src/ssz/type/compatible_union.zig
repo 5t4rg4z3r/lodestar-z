@@ -1,5 +1,6 @@
 const std = @import("std");
 const TypeKind = @import("type_kind.zig").TypeKind;
+const SszSize = @import("type_kind.zig").SszSize;
 const isFixedType = @import("type_kind.zig").isFixedType;
 const hashOne = @import("hashing").hashOne;
 const Node = @import("persistent_merkle_tree").Node;
@@ -159,17 +160,17 @@ pub fn CompatibleUnionType(comptime options: anytype) type {
     const ValueType = UnionDataType(options);
 
     // Calculate min and max sizes
-    comptime var _min_size: usize = std.math.maxInt(usize);
-    comptime var _max_size: usize = 0;
+    comptime var _min_size: SszSize = std.math.maxInt(SszSize);
+    comptime var _max_size: SszSize = 0;
 
     inline for (options) |option| {
         const option_type = option.@"1";
-        const option_min = if (@hasDecl(option_type, "min_size")) option_type.min_size else option_type.fixed_size;
-        const option_max = if (@hasDecl(option_type, "max_size")) option_type.max_size else option_type.fixed_size;
+        const option_min = if (@hasDecl(option_type, "min_size")) option_type.min_size else @as(SszSize, option_type.fixed_size);
+        const option_max = if (@hasDecl(option_type, "max_size")) option_type.max_size else @as(SszSize, option_type.fixed_size);
         _min_size = @min(_min_size, option_min);
-        // Handle unbounded types (max_size == maxInt(usize))
-        if (option_max == std.math.maxInt(usize)) {
-            _max_size = std.math.maxInt(usize);
+        // Handle unbounded types (max_size == maxInt(SszSize))
+        if (option_max == std.math.maxInt(SszSize)) {
+            _max_size = std.math.maxInt(SszSize);
         } else {
             _max_size = @max(_max_size, option_max);
         }
@@ -177,7 +178,7 @@ pub fn CompatibleUnionType(comptime options: anytype) type {
 
     // Add 1 byte for the selector
     _min_size += 1;
-    if (_max_size != std.math.maxInt(usize)) {
+    if (_max_size != std.math.maxInt(SszSize)) {
         _max_size += 1;
     }
 
@@ -185,8 +186,8 @@ pub fn CompatibleUnionType(comptime options: anytype) type {
         const Self = @This();
         pub const kind = TypeKind.compatible_union;
         pub const Type: type = ValueType;
-        pub const min_size: usize = _min_size;
-        pub const max_size: usize = _max_size;
+        pub const min_size: SszSize = _min_size;
+        pub const max_size: SszSize = _max_size;
         pub const _union_options = options;
 
         /// Get the selector value from a union value

@@ -1,5 +1,7 @@
 const std = @import("std");
 const TypeKind = @import("type_kind.zig").TypeKind;
+const SszSize = @import("type_kind.zig").SszSize;
+const toSszSize = @import("type_kind.zig").toSszSize;
 const isBasicType = @import("type_kind.zig").isBasicType;
 const isFixedType = @import("type_kind.zig").isFixedType;
 const canMemcpySsz = @import("type_kind.zig").canMemcpySsz;
@@ -492,8 +494,11 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
             ArrayBasicTreeView(@This())
         else
             ArrayCompositeTreeView(@This());
-        pub const min_size: usize = Element.min_size * length + 4 * length;
-        pub const max_size: usize = Element.max_size * length + 4 * length;
+        pub const min_size: SszSize = (Element.min_size + 4) * length;
+        pub const max_size: SszSize = if (Element.max_size == std.math.maxInt(SszSize))
+            std.math.maxInt(SszSize)
+        else
+            (Element.max_size + 4) * length;
         pub const chunk_count: usize = length;
         pub const chunk_depth: u8 = maxChunksToDepth(chunk_count);
 
@@ -579,7 +584,7 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
         }
 
         pub fn deserializeFromBytes(allocator: std.mem.Allocator, data: []const u8, out: *Type) !void {
-            if (data.len > max_size or data.len < min_size) {
+            if (toSszSize(data.len) > max_size or toSszSize(data.len) < min_size) {
                 return error.InvalidSize;
             }
 
@@ -598,7 +603,7 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
 
         pub const serialized = struct {
             pub fn validate(data: []const u8) !void {
-                if (data.len > max_size or data.len < min_size) {
+                if (toSszSize(data.len) > max_size or toSszSize(data.len) < min_size) {
                     return error.InvalidSize;
                 }
 
@@ -648,7 +653,7 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
             }
 
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
-                if (data.len > max_size or data.len < min_size) {
+                if (toSszSize(data.len) > max_size or toSszSize(data.len) < min_size) {
                     return error.InvalidSize;
                 }
 

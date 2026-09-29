@@ -1,5 +1,6 @@
 const std = @import("std");
 const TypeKind = @import("type_kind.zig").TypeKind;
+const SszSize = @import("type_kind.zig").SszSize;
 const isBasicType = @import("type_kind.zig").isBasicType;
 const isFixedType = @import("type_kind.zig").isFixedType;
 const VariableElementIterator = @import("variable_element_iterator.zig").VariableElementIterator;
@@ -21,8 +22,8 @@ pub fn FixedProgressiveListType(comptime ST: type) type {
         pub const kind = TypeKind.progressive_list;
         pub const Element: type = ST;
         pub const Type: type = std.ArrayListUnmanaged(Element.Type);
-        pub const min_size: usize = 0;
-        pub const max_size: usize = std.math.maxInt(usize);
+        pub const min_size: SszSize = 0;
+        pub const max_size: SszSize = std.math.maxInt(SszSize);
 
         pub const default_value: Type = Type.empty;
 
@@ -332,8 +333,8 @@ pub fn VariableProgressiveListType(comptime ST: type) type {
         pub const kind = TypeKind.progressive_list;
         pub const Element: type = ST;
         pub const Type: type = std.ArrayListUnmanaged(Element.Type);
-        pub const min_size: usize = 0;
-        pub const max_size: usize = std.math.maxInt(usize);
+        pub const min_size: SszSize = 0;
+        pub const max_size: SszSize = std.math.maxInt(SszSize);
 
         pub const default_value: Type = Type.empty;
 
