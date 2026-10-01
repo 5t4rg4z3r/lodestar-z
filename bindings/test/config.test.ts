@@ -1,8 +1,11 @@
 import {createChainForkConfig} from "@lodestar/config";
 import {mainnetChainConfig} from "@lodestar/config/configs";
 import {networksChainConfig} from "@lodestar/config/networks";
+import {computeEpochAtSlot} from "@lodestar/state-transition";
+import {ssz} from "@lodestar/types";
 import {describe, expect, it} from "vitest";
 import bindings from "../src/index.js";
+import {createStfState, stfConfig} from "./stfFixture.js";
 
 describe("BeaconConfig", () => {
   describe.each([
@@ -31,6 +34,37 @@ describe("BeaconConfig", () => {
     expect(() => new bindings.BeaconConfig(mainnetChainConfig, new Uint8Array(length))).toThrow(
       "InvalidGenesisValidatorsRootLength"
     );
+  });
+
+  it("uses a custom SHARD_COMMITTEE_PERIOD for voluntary exit validity", () => {
+    const stateBytes = ssz.fulu.BeaconState.serialize(createStfState());
+    const currentEpoch = computeEpochAtSlot(ssz.fulu.BeaconState.deserialize(stateBytes).slot);
+    const validConfig = new bindings.BeaconConfig(
+      {...stfConfig, SHARD_COMMITTEE_PERIOD: currentEpoch},
+      new Uint8Array(32)
+    );
+    const rejectingConfig = new bindings.BeaconConfig(
+      {...stfConfig, SHARD_COMMITTEE_PERIOD: currentEpoch + 1},
+      new Uint8Array(32)
+    );
+    const exit = {
+      message: {epoch: currentEpoch, validatorIndex: 0},
+      signature: new Uint8Array(96),
+    };
+    let validState: InstanceType<typeof bindings.BeaconStateView> | undefined;
+    let rejectingState: InstanceType<typeof bindings.BeaconStateView> | undefined;
+
+    bindings.pubkeys.ensureCapacity(16);
+    try {
+      validState = bindings.BeaconStateView.createFromBytes(stateBytes, validConfig);
+      rejectingState = bindings.BeaconStateView.createFromBytes(stateBytes, rejectingConfig);
+
+      expect(validState.getVoluntaryExitValidity(exit, false)).toBe("valid");
+      expect(rejectingState.getVoluntaryExitValidity(exit, false)).toBe("short_time_active");
+    } finally {
+      rejectingState?.release();
+      validState?.release();
+    }
   });
 
   for (const [name, chainConfig] of Object.entries(networksChainConfig)) {
