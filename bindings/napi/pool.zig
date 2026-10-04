@@ -7,7 +7,7 @@ const TrackedAllocator = @import("tracked_allocator.zig");
 
 /// Backs the `PoolRc` wrapper allocation only — `Node.Pool` uses its own
 /// `InitOptions` allocators.
-const allocator = std.heap.page_allocator;
+const allocator = std.heap.c_allocator;
 
 const pool_size_environment_variable = "LODESTAR_Z_NODE_POOL_CAPACITY";
 // Arbitrary limit to avoid excessive memory usage.

@@ -53,7 +53,7 @@ const State = struct {
 
     pub fn init(self: *State, n_workers: u16) !void {
         if (self.thread_pool != null) return error.PoolExists;
-        self.thread_pool = try ThreadPool.init(std.heap.page_allocator, js.io(), .{ .n_workers = n_workers });
+        self.thread_pool = try ThreadPool.init(std.heap.c_allocator, js.io(), .{ .n_workers = n_workers });
     }
 
     /// Closes the `ThreadPool` used for blst operations.

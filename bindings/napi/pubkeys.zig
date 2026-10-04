@@ -8,8 +8,7 @@ const PubkeyCache = state_transition.PubkeyCache;
 const pkix = state_transition.pkix;
 const Validator = @import("consensus_types").phase0.Validator.Type;
 
-/// Uses the page allocator for the process-wide cache's internal allocations.
-const allocator = std.heap.page_allocator;
+const allocator = std.heap.c_allocator;
 
 const default_initial_capacity: u32 = 0;
 const max_stack_aggregate_pubkeys = 512;
