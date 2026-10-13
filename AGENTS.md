@@ -426,29 +426,6 @@ One line.
 Disclose AI assistance in the PR description, following Lodestar's convention. State whether the
 implementation was primarily AI-authored or whether AI was used only for codebase exploration.
 
-### Reviewability pass
-
-Run this pass before reporting a change as ready for review. Passing tests does not replace it.
-
-1. Separate correctness defects from reviewability findings. Require concrete evidence for both.
-   Include inconsistent patterns, unnecessary casts, widened signatures, awkward test setup, and
-   unexplained changes. Omit unsupported personal preferences.
-2. For changed aliases, signatures, and fork types, search callers, tests, and benchmarks. Compare
-   sibling definitions and fork implementations. Report intentional exceptions. Do not convert
-   every match blindly.
-3. Question casts in affected paths. Compile and run relevant tests after removing unnecessary
-   casts. Do not delete every nearby cast mechanically.
-4. Verify skips against actual test vectors and consensus assumptions against the pinned
-   specification. Verify TODO assumptions against their source. If evidence is unavailable, say so.
-   Existing code is evidence, not proof.
-5. After fixes, verify accepted findings and review the complete updated diff. Check for leftovers,
-   new inconsistencies, unnecessary changes, and local conventions. Distinguish type-only changes
-   from behavioral changes. Give a short reason for non-obvious type-driven changes in the commit
-   message or review report.
-6. Report noticed but deferred cleanup. State the concrete concern, why it remains, and whether it
-   belongs in the current change. Do not predict what a reviewer will flag. Keep cleanup within the
-   approved scope or request a user decision.
-
 ### Pre-push checklist
 
 1. `zig fmt --check .`
@@ -459,7 +436,6 @@ Run this pass before reporting a change as ready for review. Passing tests does 
 6. Rebuild bindings and run `pnpm test` for binding or NAPI changes
 7. Confirm no generated test source or build output was edited manually
 8. Confirm both ownership cleanup and error paths are covered
-9. Complete the reviewability pass and report evidence, intentional exceptions, and deferred cleanup
 
 ## Common tasks
 
