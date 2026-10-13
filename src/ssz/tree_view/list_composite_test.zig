@@ -14,10 +14,143 @@ const FixedListType = @import("../type/list.zig").FixedListType;
 const VariableListType = @import("../type/list.zig").VariableListType;
 const FixedVectorType = @import("../type/vector.zig").FixedVectorType;
 
+test "TreeView composite list getValuesByRangeInto reads fixed range" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 512 });
+    defer pool.deinit();
+
+    const ListType = FixedListType(Checkpoint, 16, .{});
+    var values: ListType.Type = .empty;
+    defer values.deinit(allocator);
+    for (0..6) |i| try values.append(allocator, .{ .epoch = @intCast(i + 1), .root = [_]u8{@intCast(i + 1)} ** 32 });
+
+    const root = try ListType.tree.fromValue(&pool, &values);
+    var view = try ListType.TreeView.init(allocator, &pool, root);
+    defer view.deinit();
+
+    var out: [3]Checkpoint.Type = undefined;
+    const root_before = view.getRoot();
+    const changed_before = view.chunks.state.changed.count();
+    var failing_allocator = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 0 });
+    view.chunks.state.allocator = failing_allocator.allocator();
+    const result = view.getValuesByRangeInto(2, &out) catch |err| {
+        view.chunks.state.allocator = allocator;
+        return err;
+    };
+    view.chunks.state.allocator = allocator;
+    try std.testing.expectEqual(@intFromPtr(&out[0]), @intFromPtr(result.ptr));
+    for (result, 2..) |actual, i| {
+        try std.testing.expectEqual(values.items[i].epoch, actual.epoch);
+        try std.testing.expectEqualSlices(u8, &values.items[i].root, &actual.root);
+    }
+    try std.testing.expectEqual(root_before, view.getRoot());
+    try std.testing.expectEqual(changed_before, view.chunks.state.changed.count());
+
+    var empty: [0]Checkpoint.Type = .{};
+    try std.testing.expect((try view.getValuesByRangeInto(0, &empty)).ptr == &empty);
+    try std.testing.expect((try view.getValuesByRangeInto(values.items.len, &empty)).ptr == &empty);
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(values.items.len + 1, &empty));
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(std.math.maxInt(usize), &out));
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(values.items.len - 1, &out));
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(values.items.len, out[0..1]));
+
+    const replacement = Checkpoint.Type{ .epoch = 99, .root = [_]u8{99} ** 32 };
+    try view.setValue(0, &replacement);
+    try std.testing.expect((try view.getValuesByRangeInto(0, &empty)).ptr == &empty);
+    out[0].epoch = 123;
+    try std.testing.expectError(error.MustCommitBeforeBulkRead, view.getValuesByRangeInto(2, out[0..1]));
+    try std.testing.expectEqual(@as(u64, 123), out[0].epoch);
+    try view.commit();
+    try std.testing.expectEqual(@as(u64, 99), (try view.getValuesByRangeInto(0, out[0..1]))[0].epoch);
+
+    const appended = Checkpoint.Type{ .epoch = 100, .root = [_]u8{100} ** 32 };
+    try view.pushValue(&appended);
+    try view.commit();
+    try std.testing.expectEqual(@as(u64, 100), (try view.getValuesByRangeInto(6, out[0..1]))[0].epoch);
+    try std.testing.expect((try view.getValuesByRangeInto(7, &empty)).ptr == &empty);
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(8, &empty));
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(6, out[0..2]));
+}
+
 const Checkpoint = FixedContainerType(struct {
     epoch: UintType(64),
     root: ByteVectorType(32),
 });
+
+const RangeBytes = ByteListType(32);
+const RangeElement = VariableContainerType(struct {
+    first: RangeBytes,
+    second: RangeBytes,
+});
+const RangeList = VariableListType(RangeElement, 8);
+
+test "TreeView composite list getValuesByRangeInto reads owned variable range" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 512 });
+    defer pool.deinit();
+
+    var source: RangeList.Type = .empty;
+    defer RangeList.deinit(allocator, &source);
+    for (0..4) |i| {
+        try source.append(allocator, RangeElement.default_value);
+        try source.items[i].first.appendSlice(allocator, &.{ @intCast(i + 1), 0xA });
+        try source.items[i].second.appendSlice(allocator, &.{ @intCast(i + 11), 0xB });
+    }
+
+    const root = try RangeList.tree.fromValue(&pool, &source);
+    var view = try RangeList.TreeView.init(allocator, &pool, root);
+    defer view.deinit();
+    const root_before = view.getRoot();
+    const changed_before = view.chunks.state.changed.count();
+
+    var out: [2]RangeElement.Type = .{ RangeElement.default_value, RangeElement.default_value };
+    const result = try view.getValuesByRangeInto(allocator, 1, &out);
+    defer for (result) |*value| RangeElement.deinit(allocator, value);
+    try std.testing.expectEqual(@intFromPtr(&out[0]), @intFromPtr(result.ptr));
+    for (result, 1..) |actual, i| {
+        try std.testing.expectEqualSlices(u8, source.items[i].first.items, actual.first.items);
+        try std.testing.expectEqualSlices(u8, source.items[i].second.items, actual.second.items);
+    }
+    var empty: [0]RangeElement.Type = .{};
+    try std.testing.expect((try view.getValuesByRangeInto(allocator, 0, &empty)).ptr == &empty);
+    try std.testing.expect((try view.getValuesByRangeInto(allocator, source.items.len, &empty)).ptr == &empty);
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(allocator, source.items.len + 1, &empty));
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(allocator, std.math.maxInt(usize), &empty));
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(allocator, 3, &out));
+    try std.testing.expectEqual(root_before, view.getRoot());
+    try std.testing.expectEqual(changed_before, view.chunks.state.changed.count());
+}
+
+test "memory_safety: list range conversion deinitializes partial values on OOM" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 512 });
+    defer pool.deinit();
+
+    var source: RangeList.Type = .empty;
+    defer RangeList.deinit(allocator, &source);
+    for (0..2) |i| {
+        try source.append(allocator, RangeElement.default_value);
+        try source.items[i].first.appendSlice(allocator, &.{ @intCast(i + 1), 0xA });
+        try source.items[i].second.appendSlice(allocator, &.{ @intCast(i + 11), 0xB });
+    }
+
+    const root = try RangeList.tree.fromValue(&pool, &source);
+    var view = try RangeList.TreeView.init(allocator, &pool, root);
+    defer view.deinit();
+
+    var backing = std.testing.FailingAllocator.init(allocator, .{ .resize_fail_index = 0 });
+    try std.testing.checkAllAllocationFailures(backing.allocator(), struct {
+        fn run(output_allocator: std.mem.Allocator, input: *RangeList.TreeView) !void {
+            var values: [2]RangeElement.Type = .{ RangeElement.default_value, RangeElement.default_value };
+            const result = try input.getValuesByRangeInto(output_allocator, 0, &values);
+            defer for (result) |*value| RangeElement.deinit(output_allocator, value);
+            try std.testing.expectEqualSlices(u8, &.{ 1, 0xA }, result[0].first.items);
+            try std.testing.expectEqualSlices(u8, &.{ 2, 0xA }, result[1].first.items);
+            try std.testing.expectEqualSlices(u8, &.{ 11, 0xB }, result[0].second.items);
+            try std.testing.expectEqualSlices(u8, &.{ 12, 0xB }, result[1].second.items);
+        }
+    }.run, .{view});
+}
 
 test "TreeView composite list iteratorReadonly nextValuePtr walks struct elements" {
     const allocator = std.testing.allocator;

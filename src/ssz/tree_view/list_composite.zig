@@ -173,6 +173,26 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
             return self.chunks.getAllValues(allocator, list_length);
         }
 
+        /// Fills `out` with values starting at `start_index`; output slots may be uninitialized.
+        /// Nonempty reads require committed element writes. Variable-size values belong to the
+        /// caller on success and are cleaned on failure.
+        pub const getValuesByRangeInto = if (isFixedType(ST.Element))
+            getValuesByRangeIntoFixed
+        else
+            getValuesByRangeIntoAlloc;
+
+        fn getValuesByRangeIntoFixed(self: *Self, start_index: usize, out: []ST.Element.Type) ![]ST.Element.Type {
+            const list_length = try self.length();
+            if (start_index > list_length or out.len > list_length - start_index) return error.IndexOutOfBounds;
+            return self.chunks.getValuesByRangeInto(start_index, out);
+        }
+
+        fn getValuesByRangeIntoAlloc(self: *Self, allocator: Allocator, start_index: usize, out: []ST.Element.Type) ![]ST.Element.Type {
+            const list_length = try self.length();
+            if (start_index > list_length or out.len > list_length - start_index) return error.IndexOutOfBounds;
+            return self.chunks.getValuesByRangeInto(allocator, start_index, out);
+        }
+
         /// Appends an element to the end of the list.
         ///
         /// Ownership of the `value` TreeView transfers to the list view on success. After a
