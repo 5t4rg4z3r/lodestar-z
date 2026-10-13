@@ -443,9 +443,9 @@ pub fn CompositeChunks(
             const values = try allocator.alloc(Value, len);
             errdefer allocator.free(values);
             if (comptime isFixedType(ST.Element)) {
-                return try self.getValuesByRangeIntoFixed(0, values);
+                return try self.getValuesByRangeInto(0, values);
             } else {
-                return try self.getValuesByRangeIntoAlloc(allocator, 0, values);
+                return try self.getValuesByRangeInto(allocator, 0, values);
             }
         }
 
