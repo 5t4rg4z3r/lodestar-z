@@ -442,45 +442,63 @@ pub fn CompositeChunks(
         pub fn getAllValues(self: *Self, allocator: Allocator, len: usize) ![]Value {
             const values = try allocator.alloc(Value, len);
             errdefer allocator.free(values);
-            return try self.getAllValuesInto(allocator, values);
+            if (comptime isFixedType(ST.Element)) {
+                return try self.getValuesByRangeIntoFixed(0, values);
+            } else {
+                return try self.getValuesByRangeIntoAlloc(allocator, 0, values);
+            }
         }
 
-        /// Fills `values` with all element values.
-        pub fn getAllValuesInto(self: *Self, allocator: Allocator, values: []Value) ![]Value {
-            const len = values.len;
-            if (len == 0) return values;
+        /// Fills `values` with `values.len` element values starting at `start_index`, in a single
+        /// traversal. Picks between the non-allocating version for fixed types or the allocating
+        /// version for variable-length types.
+        pub const getValuesByRangeInto = if (isFixedType(ST.Element))
+            getValuesByRangeIntoFixed
+        else
+            getValuesByRangeIntoAlloc;
+
+        fn getValuesByRangeIntoFixed(self: *Self, start_index: usize, values: []Value) ![]Value {
+            if (values.len == 0) return values;
 
             if (self.state.changed.count() != 0) {
                 return error.MustCommitBeforeBulkRead;
             }
 
-            const nodes = try allocator.alloc(Node.Id, len);
-            defer allocator.free(nodes);
+            var nodes = Node.DepthIterator.init(self.state.pool, self.state.root, chunk_depth, start_index);
+            for (values) |*value| {
+                try ST.Element.tree.toValue(try nodes.next(), self.state.pool, value);
+            }
 
-            try self.state.root.getNodesAtDepth(self.state.pool, chunk_depth, 0, nodes);
+            return values;
+        }
 
-            for (nodes, 0..) |node, i| {
+        /// Requires an allocator for `toValue`.
+        fn getValuesByRangeIntoAlloc(self: *Self, allocator: Allocator, start_index: usize, values: []Value) ![]Value {
+            if (values.len == 0) return values;
+
+            if (self.state.changed.count() != 0) {
+                return error.MustCommitBeforeBulkRead;
+            }
+
+            var nodes = Node.DepthIterator.init(self.state.pool, self.state.root, chunk_depth, start_index);
+            for (values, 0..) |*value, i| {
                 errdefer if (comptime @hasDecl(ST.Element, "deinit")) {
                     for (values[0..i]) |*v| {
                         ST.Element.deinit(allocator, v);
                     }
                 };
-                if (comptime isFixedType(ST.Element)) {
-                    try ST.Element.tree.toValue(node, self.state.pool, &values[i]);
+                // Initialize value to default before toValue for variable types
+                // (e.g. BitList fields need initialized ArrayList)
+                if (comptime @hasDecl(ST.Element, "default_value")) {
+                    value.* = ST.Element.default_value;
                 } else {
-                    // Initialize value to default before toValue for variable types
-                    // (e.g. BitList fields need initialized ArrayList)
-                    if (comptime @hasDecl(ST.Element, "default_value")) {
-                        values[i] = ST.Element.default_value;
-                    } else {
-                        values[i] = std.mem.zeroes(Value);
-                    }
-                    errdefer if (comptime @hasDecl(ST.Element, "deinit")) {
-                        ST.Element.deinit(allocator, &values[i]);
-                    };
-
-                    try ST.Element.tree.toValue(allocator, node, self.state.pool, &values[i]);
+                    value.* = std.mem.zeroes(Value);
                 }
+                errdefer if (comptime @hasDecl(ST.Element, "deinit")) {
+                    ST.Element.deinit(allocator, value);
+                };
+
+                try ST.Element.tree.toValue(allocator, try nodes.next(), self.state.pool, value);
             }
 
             return values;

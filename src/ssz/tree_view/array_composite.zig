@@ -141,6 +141,24 @@ pub fn ArrayCompositeTreeView(comptime ST: type) type {
             return self.chunks.getAllValues(allocator, length);
         }
 
+        /// Fills `out` with the values of `out.len` elements starting at `start_index`, in a single
+        /// traversal. Picks between the non-allocating version for fixed types or the allocating
+        /// version for variable-length types.
+        pub const getValuesByRangeInto = if (isFixedType(ST.Element))
+            getValuesByRangeIntoFixed
+        else
+            getValuesByRangeIntoAlloc;
+
+        fn getValuesByRangeIntoFixed(self: *Self, start_index: usize, out: []ST.Element.Type) ![]ST.Element.Type {
+            if (start_index > length or out.len > length - start_index) return error.IndexOutOfBounds;
+            return self.chunks.getValuesByRangeInto(start_index, out);
+        }
+
+        fn getValuesByRangeIntoAlloc(self: *Self, allocator: Allocator, start_index: usize, out: []ST.Element.Type) ![]ST.Element.Type {
+            if (start_index > length or out.len > length - start_index) return error.IndexOutOfBounds;
+            return self.chunks.getValuesByRangeInto(allocator, start_index, out);
+        }
+
         /// Serialize the tree view into a provided buffer.
         /// Returns the number of bytes written.
         pub fn serializeIntoBytes(self: *Self, out: []u8) !usize {

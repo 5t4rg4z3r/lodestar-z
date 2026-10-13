@@ -105,6 +105,56 @@ test "TreeView vector composite index bounds" {
     try std.testing.expectError(error.IndexOutOfBounds, view.set(2, replacement_view.?));
 }
 
+test "TreeView vector composite getValuesByRangeInto reads values without changing view" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 512 });
+    defer pool.deinit();
+
+    const Inner = FixedContainerType(struct { x: UintType(64) });
+    const VectorType = FixedVectorType(Inner, 4, .{});
+    const original: VectorType.Type = .{ .{ .x = 1 }, .{ .x = 2 }, .{ .x = 3 }, .{ .x = 4 } };
+
+    const root_node = try VectorType.tree.fromValue(&pool, &original);
+    var view = try VectorType.TreeView.init(allocator, &pool, root_node);
+    defer view.deinit();
+
+    var out: [2]Inner.Type = undefined;
+    _ = try view.getValuesByRangeInto(1, out[0..]);
+
+    try std.testing.expectEqual(@as(u64, 2), out[0].x);
+    try std.testing.expectEqual(@as(u64, 3), out[1].x);
+    try std.testing.expectEqual(@as(usize, 0), view.chunks.state.changed.count());
+
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(3, out[0..]));
+}
+
+test "TreeView vector composite getValuesByRangeInto allocates variable-size elements" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 64 });
+    defer pool.deinit();
+
+    const Bytes = ByteListType(8);
+    const VectorType = VariableVectorType(Bytes, 3);
+
+    var value = VectorType.default_value;
+    defer VectorType.deinit(allocator, &value);
+    try value[0].appendSlice(allocator, &[_]u8{1});
+    try value[1].appendSlice(allocator, &[_]u8{ 2, 2 });
+    try value[2].appendSlice(allocator, &[_]u8{ 3, 3, 3 });
+
+    var view = try VectorType.TreeView.fromValue(allocator, &pool, &value);
+    defer view.deinit();
+
+    var out: [2]Bytes.Type = undefined;
+    _ = try view.getValuesByRangeInto(allocator, 1, out[0..]);
+    defer for (&out) |*v| Bytes.deinit(allocator, v);
+
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 2, 2 }, out[0].items);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 3, 3, 3 }, out[1].items);
+
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(allocator, 2, out[0..]));
+}
+
 test "TreeView vector composite clearCache does not break subsequent commits" {
     const allocator = std.testing.allocator;
     var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 512 });
