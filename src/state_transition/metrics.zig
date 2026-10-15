@@ -19,6 +19,13 @@ pub const StateHashTreeRootSource = enum {
     compute_new_state_root,
 };
 
+/// Consumer-facing source of a block-processing transition.
+pub const ProcessBlockSource = enum {
+    block,
+    regen,
+    get_historical_state,
+};
+
 pub const EpochTransitionStepKind = enum {
     before_process_epoch,
     after_process_epoch,
@@ -66,6 +73,7 @@ pub const ProposerRewardKind = enum {
 };
 
 const HashTreeRootLabel = struct { source: StateHashTreeRootSource };
+const ProcessBlockLabel = struct { source: ProcessBlockSource };
 const EpochTransitionStepLabel = struct { step: EpochTransitionStepKind };
 const ProcessBlockStepLabel = struct { step: ProcessBlockStepKind };
 const ProcessOperationsStepLabel = struct { step: ProcessOperationsStepKind };
@@ -98,11 +106,11 @@ const Metrics = struct {
     proposer_rewards: ProposerRewardsGauge,
     progressive_balances_mismatches: ProgressiveBalancesMismatches,
 
-    const EpochTransition = m.Histogram(f64, &.{ 0.2, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 10 });
+    const EpochTransition = m.Histogram(f64, &.{ 0.01, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 1, 3 });
     const EpochTransitionCommit = m.Histogram(f64, &.{ 0.01, 0.05, 0.1, 0.2, 0.5, 0.75, 1 });
     const EpochTransitionStep = m.HistogramVec(f64, EpochTransitionStepLabel, &.{ 0.01, 0.05, 0.1, 0.2, 0.5, 0.75, 1 });
     const EpochShufflingJob = m.Histogram(f64, &.{ 0.01, 0.05, 0.1, 0.2, 0.5, 0.75, 1 });
-    const ProcessBlock = m.Histogram(f64, &.{ 0.005, 0.01, 0.02, 0.05, 0.1, 1 });
+    const ProcessBlock = m.HistogramVec(f64, ProcessBlockLabel, &.{ 0.005, 0.01, 0.02, 0.05, 0.1, 1 });
     const ProcessBlockStep = m.HistogramVec(f64, ProcessBlockStepLabel, &.{ 0.001, 0.005, 0.01, 0.025, 0.05, 0.1 });
     const ProcessOperationsStep = m.HistogramVec(f64, ProcessOperationsStepLabel, &.{ 0.001, 0.005, 0.01, 0.025, 0.05, 0.1 });
     const ProcessBlockCommit = m.Histogram(f64, &.{ 0.005, 0.01, 0.02, 0.05, 0.1, 1 });
@@ -115,6 +123,7 @@ const Metrics = struct {
     /// Deinitializes all `HistogramVec` and `GaugeVec` metrics for state transition.
     pub fn deinit(self: *Metrics) void {
         self.epoch_transition_step.deinit();
+        self.process_block.deinit();
         self.process_block_step.deinit();
         self.process_operations_step.deinit();
         self.state_hash_tree_root.deinit();
@@ -146,6 +155,14 @@ pub fn init(allocator: Allocator, io: std.Io, comptime opts: m.RegistryOpts) !vo
         .exclude = opts.exclude,
     };
 
+    var process_block = try Metrics.ProcessBlock.init(
+        allocator,
+        io,
+        "stfn_process_block_seconds",
+        .{ .help = "Time to process a single block in seconds" },
+        metric_opts,
+    );
+    errdefer process_block.deinit();
     var epoch_transition_step = try Metrics.EpochTransitionStep.init(
         allocator,
         io,
@@ -212,11 +229,7 @@ pub fn init(allocator: Allocator, io: std.Io, comptime opts: m.RegistryOpts) !vo
             .{ .help = "Time to build the next epoch shuffling in the shuffling job" },
             metric_opts,
         ),
-        .process_block = Metrics.ProcessBlock.init(
-            "stfn_process_block_seconds",
-            .{ .help = "Time to process a single block in seconds" },
-            metric_opts,
-        ),
+        .process_block = process_block,
         .process_block_step = process_block_step,
         .process_operations_step = process_operations_step,
         .process_block_commit = Metrics.ProcessBlockCommit.init(
@@ -348,72 +361,6 @@ pub fn deinit() void {
     validator_monitor = m.initializeNoop(ValidatorMonitorMetrics);
 }
 
-test "exports the expected metric names" {
-    const allocator = std.testing.allocator;
-    try init(allocator, std.testing.io, .{});
-    defer deinit();
-
-    try state_transition.process_block_step.observe(.{ .step = .processBlockHeader }, 0.001);
-    try state_transition.process_operations_step.observe(.{ .step = .processAttestations }, 0.001);
-
-    var aw: std.Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-    try write(&aw.writer);
-
-    const expected = [_][]const u8{
-        "lodestar_stfn_epoch_transition_seconds",
-        "lodestar_stfn_epoch_transition_commit_seconds",
-        "lodestar_stfn_epoch_transition_step_seconds",
-        "lodestar_stfn_epoch_shuffling_job_seconds",
-        "lodestar_stfn_process_block_seconds",
-        "lodestar_stfn_process_block_step_seconds",
-        "lodestar_stfn_process_operations_step_seconds",
-        "lodestar_stfn_process_block_commit_seconds",
-        "lodestar_stfn_hash_tree_root_seconds",
-        "lodestar_stfn_effective_balance_updates_count",
-        "lodestar_stfn_validators_in_activation_queue",
-        "lodestar_stfn_validators_in_exit_queue",
-        "lodestar_stfn_state_cloned_count",
-        "lodestar_stfn_post_state_balances_nodes_populated_hit_total",
-        "lodestar_stfn_post_state_balances_nodes_populated_miss_total",
-        "lodestar_stfn_post_state_validators_nodes_populated_hit_total",
-        "lodestar_stfn_post_state_validators_nodes_populated_miss_total",
-        "lodestar_stfn_new_seen_attesters_per_block_total",
-        "lodestar_stfn_new_seen_attesters_effective_balance_per_block_total",
-        "lodestar_stfn_attestations_per_block_total",
-        "lodestar_stfn_proposer_rewards_total",
-        "lodestar_stfn_progressive_balances_mismatches_total",
-        "validator_monitor_prev_epoch_on_chain_balance",
-        "validator_monitor_prev_epoch_on_chain_source_attester_hit_total",
-        "validator_monitor_prev_epoch_on_chain_source_attester_miss_total",
-        "validator_monitor_prev_epoch_on_chain_head_attester_hit_total",
-        "validator_monitor_prev_epoch_on_chain_head_attester_miss_total",
-        "validator_monitor_prev_epoch_on_chain_target_attester_hit_total",
-        "validator_monitor_prev_epoch_on_chain_target_attester_miss_total",
-    };
-
-    var names: std.ArrayList([]const u8) = .empty;
-    defer names.deinit(allocator);
-    var lines = std.mem.splitScalar(u8, aw.written(), '\n');
-    while (lines.next()) |line| {
-        if (!std.mem.startsWith(u8, line, "# TYPE ")) continue;
-        var parts = std.mem.splitScalar(u8, line["# TYPE ".len..], ' ');
-        try names.append(allocator, parts.next().?);
-    }
-
-    try std.testing.expectEqual(expected.len, names.items.len);
-    for (expected, names.items) |name, actual| {
-        try std.testing.expectEqualStrings(name, actual);
-    }
-
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        aw.written(),
-        "lodestar_stfn_process_block_step_seconds_count{step=\"processBlockHeader\"} 1\n",
-    ) != null);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        aw.written(),
-        "lodestar_stfn_process_operations_step_seconds_count{step=\"processAttestations\"} 1\n",
-    ) != null);
+test {
+    _ = @import("metrics_test.zig");
 }

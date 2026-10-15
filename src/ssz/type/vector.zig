@@ -232,7 +232,7 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int, compti
                 }
 
                 if (comptime use_chunked_leaf) {
-                    var it = Node.FillWithContentsIterator.initWithOffset(pool, chunked_leaf_depth, ChunkedLeaf.k_log2);
+                    var it = Node.SubtreeBuilder.initWithOffset(pool, chunked_leaf_depth, ChunkedLeaf.k_log2);
                     errdefer it.deinit();
 
                     const bytes_per_chunked_leaf: usize = ChunkedLeaf.K * 32;
@@ -336,7 +336,7 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int, compti
 
             pub fn fromValue(pool: *Node.Pool, value: *const Type) !Node.Id {
                 if (comptime use_chunked_leaf) {
-                    var it = Node.FillWithContentsIterator.initWithOffset(pool, chunked_leaf_depth, ChunkedLeaf.k_log2);
+                    var it = Node.SubtreeBuilder.initWithOffset(pool, chunked_leaf_depth, ChunkedLeaf.k_log2);
                     errdefer it.deinit();
 
                     const items_per_chunk = 32 / Element.fixed_size;
@@ -578,16 +578,13 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
             return variable_index;
         }
 
+        /// Initialize `out` with `default_value`; the caller deinitializes it after success or error.
         pub fn deserializeFromBytes(allocator: std.mem.Allocator, data: []const u8, out: *Type) !void {
             if (data.len > max_size or data.len < min_size) {
                 return error.InvalidSize;
             }
 
             var elements = try VariableElementIterator(Self).init(data);
-            errdefer {
-                Self.deinit(allocator, out);
-                out.* = default_value;
-            }
 
             var i: usize = 0;
             while (try elements.next()) |element_bytes| : (i += 1) {
